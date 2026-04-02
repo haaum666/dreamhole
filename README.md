@@ -6,6 +6,10 @@
 
 DreamHole показывает скрытую информацию прямо на страницах hh.ru: сколько висит вакансия, менялась ли зарплата, выше или ниже она рынка, и что говорят о найме в эту компанию.
 
+| Аналитика | Отзывы | БД |
+|---|---|---|
+| ![analytics](assets/screenshot-analytics.jpg) | ![reviews](assets/screenshot-reviews.jpg) | ![db](assets/screenshot-db.jpg) |
+
 ---
 
 ## Возможности
