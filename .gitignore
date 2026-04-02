@@ -1,0 +1,18 @@
+# Secrets
+.env.deploy
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Exports
+*.xlsx
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db

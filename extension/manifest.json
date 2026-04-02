@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "DreamHole",
+  "version": "0.2.0",
+  "description": "Аналитика вакансий hh.ru: сколько висит, менялась ли зарплата, выше или ниже рынка, отзывы о найме.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": [
+    "https://hh.ru/*",
+    "https://*.hh.ru/*",
+    "https://moiraidrone.fvds.ru/*"
+  ],
+  "action": {
+    "default_title": "DreamHole",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
