@@ -358,18 +358,6 @@ async function render(vacancyId) {
     `);
   }
 
-  // ── Admin-панель ──
-  tab3 += card("", `
-    <div style="display:flex;align-items:center;gap:6px">
-      <input id="admin-token-input" type="password" placeholder="admin token"
-        style="flex:1;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;font-family:inherit"/>
-      <button id="admin-token-save"
-        style="padding:5px 10px;background:#111;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit">
-        OK
-      </button>
-    </div>
-    <div id="admin-token-status" class="note" style="margin-top:4px"></div>
-  `);
 
   root.innerHTML = `
     <div class="tabs">
@@ -399,24 +387,6 @@ async function render(vacancyId) {
     });
   });
 
-  // ── Admin token ──
-  const adminTokenInput = document.getElementById("admin-token-input");
-  const adminTokenSave = document.getElementById("admin-token-save");
-  const adminTokenStatus = document.getElementById("admin-token-status");
-  if (adminTokenSave) {
-    // Восстанавливаем сохранённый токен
-    chrome.storage.local.get("admin_token").then(s => {
-      if (s.admin_token) {
-        adminTokenInput.value = s.admin_token;
-        adminTokenStatus.textContent = "✓ токен сохранён";
-      }
-    });
-    adminTokenSave.addEventListener("click", async () => {
-      const t = adminTokenInput.value.trim();
-      await chrome.storage.local.set({ admin_token: t });
-      adminTokenStatus.textContent = t ? "✓ токен сохранён" : "токен очищен";
-    });
-  }
 
   // ── Компания (async) ──
   loadCompany(data, token, vacancyId);
