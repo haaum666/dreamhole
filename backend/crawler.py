@@ -58,11 +58,22 @@ def _parse_vacancy(item: dict) -> dict:
     work_format_ids = [f["id"] for f in item.get("work_format") or []]
     employment_form = (item.get("employment_form") or {}).get("id")
 
-    schedule_id = schedule.get("id")
-    is_remote = hh_dicts.is_remote_vacancy(schedule_id, work_format_ids)
+    # Нормализация schedule: hh.ru отдаёт то старые (fullDay/remote), то новые (ON_SITE/REMOTE)
+    _SCHEDULE_NORMALIZE = {
+        "fullDay": "ON_SITE", "shift": "SHIFT", "flexible": "FLEXIBLE",
+        "remote": "REMOTE", "flyInFlyOut": "FLY_IN_FLY_OUT",
+    }
+    raw_schedule = schedule.get("id") or ""
+    # Если есть work_format — берём его (новый формат), иначе нормализуем старый
+    if work_format_ids:
+        schedule_id = work_format_ids[0]
+    else:
+        schedule_id = _SCHEDULE_NORMALIZE.get(raw_schedule, raw_schedule)
+    is_remote = hh_dicts.is_remote_vacancy(raw_schedule, work_format_ids)
 
-    # employment: берём новое поле если есть, иначе старое
-    effective_employment = employment_form or employment.get("id")
+    # employment: нормализуем к нижнему регистру (hh.ru возвращает то "full", то "FULL")
+    raw_employment = employment_form or employment.get("id") or ""
+    effective_employment = raw_employment.lower() if raw_employment else None
 
     # initial_created_at не приходит в list API — используем created_at
     initial_created_at = _parse_dt(
@@ -136,10 +147,37 @@ def _detect_changes(old: dict, new: dict) -> list[tuple[str, str | None, str | N
         changes.append(("experience", old.get("experience_id"), new.get("experience_id")))
 
     # Work format (employment + schedule combined)
-    def _clean(v): return "" if (not v or v == "None") else v
-    old_fmt = f"{_clean(old.get('employment_id'))}/{_clean(old.get('schedule_id'))}"
-    new_fmt = f"{_clean(new.get('employment_id'))}/{_clean(new.get('schedule_id'))}"
-    if old_fmt != new_fmt and new_fmt != "/":
+    # hh.ru API нестабильно чередует старые (fullDay/remote) и новые (ON_SITE/REMOTE/HYBRID) id.
+    # Старые id — грубые (fullDay = и офис, и гибрид), новые — точные.
+    # Правило: считаем изменением ТОЛЬКО если оба значения в новом формате, или реально разная семантика.
+    _OLD_SCHEDULE_IDS = {"fullDay", "shift", "flexible", "remote", "flyInFlyOut"}
+    _NEW_SCHEDULE_IDS = {"ON_SITE", "OFFICE", "HYBRID", "REMOTE", "SHIFT", "FLY_IN_FLY_OUT",
+                         "FULL_DAY", "FLEXIBLE", "FIELD_WORK"}
+    _EMP_NORM = {"full": "FULL", "part": "PART", "project": "PROJECT",
+                 "volunteer": "VOLUNTEER", "probation": "PROBATION"}
+    _SCH_SEMANTIC = {
+        "fullDay": "office", "ON_SITE": "office", "OFFICE": "office", "FULL_DAY": "office",
+        "remote": "remote", "REMOTE": "remote",
+        "flexible": "flex", "FLEXIBLE": "flex", "HYBRID": "flex",
+        "shift": "shift", "SHIFT": "shift",
+        "flyInFlyOut": "fly", "FLY_IN_FLY_OUT": "fly",
+        "FIELD_WORK": "field",
+    }
+    def _sem(v):
+        return _SCH_SEMANTIC.get((v or "").strip(), (v or "").strip().upper())
+    old_emp = _EMP_NORM.get(old.get("employment_id") or "", (old.get("employment_id") or "").upper())
+    new_emp = _EMP_NORM.get(new.get("employment_id") or "", (new.get("employment_id") or "").upper())
+    old_sch = (old.get("schedule_id") or "").strip()
+    new_sch = (new.get("schedule_id") or "").strip()
+    # Если старое значение в новом формате, а новое — в старом — игнорируем (downgrade)
+    old_is_new_fmt = old_sch in _NEW_SCHEDULE_IDS
+    new_is_old_fmt = new_sch in _OLD_SCHEDULE_IDS
+    if old_is_new_fmt and new_is_old_fmt:
+        pass  # Не считаем изменением — hh.ru не отдал новый формат в этот раз
+    elif (old_emp != new_emp or _sem(old_sch) != _sem(new_sch)) and new_emp:
+        def _clean(v): return "" if (not v or v == "None") else v
+        old_fmt = f"{_clean(old.get('employment_id'))}/{_clean(old.get('schedule_id'))}"
+        new_fmt = f"{_clean(new.get('employment_id'))}/{_clean(new.get('schedule_id'))}"
         changes.append(("format", old_fmt, new_fmt))
 
     # Professional roles

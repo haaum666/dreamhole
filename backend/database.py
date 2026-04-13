@@ -303,43 +303,39 @@ async def get_salary_median_for_comparison(
     is_remote: bool,
     salary_type: str,  # 'from', 'to', or 'avg'
 ) -> dict:
-    # salary_type controls which field we compare — honest like-for-like comparison
-    if salary_type == "from":
-        select_expr = "salary_from"
-        where_extra = "salary_from IS NOT NULL AND salary_from > 10000"
-    elif salary_type == "to":
-        select_expr = "salary_to"
-        where_extra = "salary_to IS NOT NULL AND salary_to > 10000"
-    else:  # avg — both boundaries provided
-        select_expr = "(salary_from + salary_to) / 2.0"
-        where_extra = "salary_from IS NOT NULL AND salary_to IS NOT NULL AND (salary_from + salary_to) / 2 > 10000"
-
+    QUERIES = {
+        "from": {
+            "remote": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_from) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_from IS NOT NULL AND salary_from > 10000
+                AND schedule_id='remote' AND professional_roles && $1 AND experience_id = $2""",
+            "area": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_from) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_from IS NOT NULL AND salary_from > 10000
+                AND area = $1 AND professional_roles && $2 AND experience_id = $3""",
+        },
+        "to": {
+            "remote": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_to) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_to IS NOT NULL AND salary_to > 10000
+                AND schedule_id='remote' AND professional_roles && $1 AND experience_id = $2""",
+            "area": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_to) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_to IS NOT NULL AND salary_to > 10000
+                AND area = $1 AND professional_roles && $2 AND experience_id = $3""",
+        },
+        "avg": {
+            "remote": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (salary_from+salary_to)/2.0) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_from IS NOT NULL AND salary_to IS NOT NULL AND (salary_from+salary_to)/2 > 10000
+                AND schedule_id='remote' AND professional_roles && $1 AND experience_id = $2""",
+            "area": """SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (salary_from+salary_to)/2.0) AS median, COUNT(*) AS sample_size
+                FROM vacancies WHERE is_active AND salary_currency='RUR' AND salary_from IS NOT NULL AND salary_to IS NOT NULL AND (salary_from+salary_to)/2 > 10000
+                AND area = $1 AND professional_roles && $2 AND experience_id = $3""",
+        },
+    }
+    st = salary_type if salary_type in QUERIES else "avg"
+    mode = "remote" if is_remote else "area"
+    sql = QUERIES[st][mode]
     if is_remote:
-        row = await pool.fetchrow(f"""
-            SELECT
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {select_expr}) AS median,
-                COUNT(*) AS sample_size
-            FROM vacancies
-            WHERE is_active = TRUE
-              AND salary_currency = 'RUR'
-              AND {where_extra}
-              AND schedule_id = 'remote'
-              AND professional_roles && $1
-              AND experience_id = $2
-        """, professional_roles, experience_id)
+        row = await pool.fetchrow(sql, professional_roles, experience_id)
     else:
-        row = await pool.fetchrow(f"""
-            SELECT
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {select_expr}) AS median,
-                COUNT(*) AS sample_size
-            FROM vacancies
-            WHERE is_active = TRUE
-              AND salary_currency = 'RUR'
-              AND {where_extra}
-              AND area = $1
-              AND professional_roles && $2
-              AND experience_id = $3
-        """, area, professional_roles, experience_id)
+        row = await pool.fetchrow(sql, area, professional_roles, experience_id)
     return dict(row) if row else {}
 
 
@@ -597,13 +593,14 @@ async def insert_review(pool: asyncpg.Pool, r: dict) -> dict:
 
     # Дедупликация: один отзыв на компанию
     try:
-        await pool.execute("""
+        row = await pool.fetchrow("""
             INSERT INTO interview_reviews (
                 company_id, company_name, role_category,
                 stages, test_task_status, process_status, stopped_at_stage,
                 difficulty, hr_rating, duration_range,
                 comment, questions, user_hash
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            RETURNING id
         """,
             r["company_id"], r["company_name"], r.get("role_category"),
             r.get("stages", []), r.get("test_task_status"), r["process_status"],
@@ -615,7 +612,7 @@ async def insert_review(pool: asyncpg.Pool, r: dict) -> dict:
         if "idx_reviews_user_company" in str(e):
             return {"error": "duplicate"}
         raise
-    return {"ok": True}
+    return {"ok": True, "id": row["id"] if row else None}
 
 
 async def get_reviews(pool: asyncpg.Pool, company_id: int) -> list[dict]:
@@ -623,7 +620,7 @@ async def get_reviews(pool: asyncpg.Pool, company_id: int) -> list[dict]:
         SELECT id, role_category, stages, test_task_status, process_status,
                stopped_at_stage, difficulty, hr_rating, duration_range,
                comment, questions, submitted_at,
-               likes, dislikes, fire, poop
+               likes, dislikes, fire, poop, clown
         FROM interview_reviews
         WHERE company_id = $1 AND is_flagged = FALSE
         ORDER BY submitted_at DESC
@@ -640,7 +637,8 @@ async def get_reviews_aggregate(pool: asyncpg.Pool, company_id: int) -> dict | N
             ROUND(AVG(hr_rating), 1)                                        AS avg_hr,
             COUNT(*) FILTER (WHERE process_status = 'ghosted')             AS ghosted,
             COUNT(*) FILTER (WHERE process_status LIKE 'offer%')           AS offers,
-            COUNT(*) FILTER (WHERE process_status = 'rejected')            AS rejected
+            COUNT(*) FILTER (WHERE process_status IN ('rejected', 'rejected_screening')) AS rejected,
+            COUNT(*) FILTER (WHERE process_status = 'rejected_screening')  AS rejected_screening
         FROM interview_reviews
         WHERE company_id = $1 AND is_flagged = FALSE
     """, company_id)
@@ -654,6 +652,7 @@ async def get_reviews_aggregate(pool: asyncpg.Pool, company_id: int) -> dict | N
         "ghost_rate": round(row["ghosted"] * 100 / total),
         "offer_rate": round(row["offers"] * 100 / total),
         "reject_rate": round(row["rejected"] * 100 / total),
+        "screening_reject_rate": round(row["rejected_screening"] * 100 / total),
     }
 
 
@@ -685,12 +684,16 @@ async def vote_review(pool: asyncpg.Pool, review_id: int, vote: str, user_hash: 
                 if "unique" in str(e).lower() or "duplicate" in str(e).lower():
                     return {"error": "duplicate"}
                 raise
-            row = await conn.fetchrow(f"""
+            row = await conn.fetchrow("""
                 UPDATE interview_reviews
-                SET {col} = {col} + 1
+                SET likes    = likes    + CASE WHEN $2 = 'likes'    THEN 1 ELSE 0 END,
+                    dislikes = dislikes + CASE WHEN $2 = 'dislikes' THEN 1 ELSE 0 END,
+                    fire     = fire     + CASE WHEN $2 = 'fire'     THEN 1 ELSE 0 END,
+                    poop     = poop     + CASE WHEN $2 = 'poop'     THEN 1 ELSE 0 END,
+                    clown    = clown    + CASE WHEN $2 = 'clown'    THEN 1 ELSE 0 END
                 WHERE id = $1 AND is_flagged = FALSE
                 RETURNING likes, dislikes, fire, poop, clown
-            """, review_id)
+            """, review_id, col)
     return dict(row) if row else None
 
 
@@ -706,6 +709,7 @@ async def update_review(pool: asyncpg.Pool, review_id: int, fields: dict) -> dic
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return None
+    assert all(k in allowed for k in updates), "Invalid field in update"
     sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates))
     values = list(updates.values())
     row = await pool.fetchrow(
@@ -715,13 +719,35 @@ async def update_review(pool: asyncpg.Pool, review_id: int, fields: dict) -> dic
     return dict(row) if row else None
 
 
+async def get_reviews_feed(pool: asyncpg.Pool, offset: int = 0, limit: int = 20) -> list[dict]:
+    rows = await pool.fetch("""
+        SELECT id, company_id, company_name, role_category, stages,
+               test_task_status, process_status, stopped_at_stage,
+               difficulty, hr_rating, duration_range,
+               comment, questions, submitted_at,
+               likes, dislikes, fire, poop, clown
+        FROM interview_reviews
+        WHERE is_flagged = FALSE
+        ORDER BY submitted_at DESC
+        OFFSET $1 LIMIT $2
+    """, offset, limit)
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("submitted_at"):
+            d["submitted_at"] = d["submitted_at"].isoformat()
+        result.append(d)
+    return result
+
+
 async def get_reviews_stats(pool: asyncpg.Pool) -> dict:
     row = await pool.fetchrow("""
         SELECT
             COUNT(*)                                                        AS total,
             COUNT(DISTINCT company_id)                                      AS companies,
             COUNT(*) FILTER (WHERE process_status LIKE 'offer%')           AS offers,
-            COUNT(*) FILTER (WHERE process_status = 'rejected')            AS rejected,
+            COUNT(*) FILTER (WHERE process_status IN ('rejected', 'rejected_screening')) AS rejected,
+            COUNT(*) FILTER (WHERE process_status = 'rejected_screening')  AS rejected_screening,
             COUNT(*) FILTER (WHERE process_status = 'ghosted')             AS ghosted,
             COUNT(*) FILTER (WHERE process_status = 'ongoing')             AS ongoing,
             ROUND(AVG(difficulty), 1)                                       AS avg_difficulty,

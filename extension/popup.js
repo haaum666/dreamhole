@@ -1,5 +1,10 @@
-const API = "https://moiraidrone.fvds.ru/hh";
+const API = "https://api.dreamhole.ru/hh";
 const root = document.getElementById("root");
+
+function esc(str) {
+  if (!str) return "";
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
 // UUID для дедупликации отзывов
 async function getUserHash(companyId) {
@@ -326,7 +331,7 @@ async function render(vacancyId) {
     const crawlerBlock = buildCrawlerStatus(crawlerStatus);
     tab3 += card("База данных расширения", `
       ${row("Вакансий собрано:", stats.total_vacancies?.toLocaleString("ru-RU"))}
-      <div class="note" style="margin-top:2px;margin-bottom:6px">Направления: разработка (backend, frontend, mobile, fullstack, gamedev и др.), DevOps/администрирование, тестирование (QA/AQA), аналитика/BI, data science/ML, дизайн, управление продуктом/проектом, digital-маркетинг, техподдержка</div>
+      <div class="note" style="margin-top:2px;margin-bottom:6px">Направления: разработка, DevOps/инфраструктура, QA, ИБ, аналитика/BI, data science/ML, продукт/проект, дизайн, контент/документация, digital-маркетинг, продажи в IT, техподдержка, HR (рекрутинг, C&B, T&D, КДП), IT-менеджмент (CTO, CIO, CEO)</div>
       <hr class="divider">
       ${row("Активных / архивных:", `${stats.active_vacancies?.toLocaleString("ru-RU")} / ${stats.archived_vacancies?.toLocaleString("ru-RU")}`)}
       ${row("Компаний:", stats.companies?.toLocaleString("ru-RU"))}
@@ -493,16 +498,17 @@ function buildTrendRows(trend) {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
-const STAGE_LABELS   = { hr: "HR", test: "Тестовое", tech: "Техническое", final: "Финал" };
+const STAGE_LABELS   = { screening: "Отклик", hr: "HR", test: "Тестовое", tech: "Техническое", final: "Финал" };
 const STATUS_LABELS  = {
-  offer_accepted: "Получил оффер ✓",
-  offer_declined: "Оффер — сам отказался",
-  offer_revoked:  "Оффер отозвали",
-  rejected:       "Отказали",
-  ghosted:        "Перестали отвечать",
-  frozen:         "Позицию заморозили",
-  withdrew:       "Сам вышел из процесса",
-  waiting:        "Всё ещё жду ответа",
+  offer_accepted:     "Получил оффер ✓",
+  offer_declined:     "Оффер — сам отказался",
+  offer_revoked:      "Оффер отозвали",
+  rejected_screening: "Отказ на отклике",
+  rejected:           "Отказали",
+  ghosted:            "Перестали отвечать",
+  frozen:             "Позицию заморозили",
+  withdrew:           "Сам вышел из процесса",
+  waiting:            "Всё ещё жду ответа",
 };
 const TEST_LABELS = {
   passed:      "Проверили — прошёл",
@@ -542,6 +548,7 @@ async function loadReviewsTab(companyId, companyName) {
       ${row("Отзывов:", agg.total)}
       ${row("Гостинг:", `<span style="${ghostColor}">${agg.ghost_rate}%</span>`)}
       ${row("Офферов:", `${agg.offer_rate}%`)}
+      ${agg.screening_reject_rate ? row("Отказ на отклике:", `${agg.screening_reject_rate}%`) : ""}
       ${agg.avg_difficulty ? row("Средняя сложность:", `${agg.avg_difficulty} / 5`) : ""}
       ${agg.avg_hr ? row("Оценка HR:", `${agg.avg_hr} / 5`) : ""}
     `);
@@ -554,12 +561,12 @@ async function loadReviewsTab(companyId, companyName) {
   let listHtml = "";
   if (reviews.length) {
     listHtml = reviews.map(r => {
-      const stages = (r.stages || []).map(s => STAGE_LABELS[s] || s).join(" → ");
-      const status = STATUS_LABELS[r.process_status] || r.process_status;
+      const stages = (r.stages || []).map(s => STAGE_LABELS[s] || esc(s)).join(" → ");
+      const status = STATUS_LABELS[r.process_status] || esc(r.process_status);
       const date = new Date(r.submitted_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
       const diff = r.difficulty ? `сложность ${r.difficulty}/5` : "";
       const hr = r.hr_rating ? `HR ${r.hr_rating}/5` : "";
-      const meta = [r.role_category, stages, diff, hr].filter(Boolean).join(" · ");
+      const meta = [esc(r.role_category), stages, diff, hr].filter(Boolean).join(" · ");
       const voted = votes[r.id];
       const REACTIONS = [
         { key: "like",    emoji: "👍", count: r.likes    || 0 },
@@ -597,8 +604,8 @@ async function loadReviewsTab(companyId, companyName) {
           <span class="note">${date}</span>
         </div>
         ${meta ? `<div class="note" style="margin-bottom:4px">${meta}</div>` : ""}
-        ${r.questions ? `<div style="font-size:12px;color:#555;margin-bottom:2px">Вопросы: ${r.questions}</div>` : ""}
-        ${r.comment ? `<div style="font-size:12px;color:#333">${r.comment}</div>` : ""}
+        ${r.questions ? `<div style="font-size:12px;color:#555;margin-bottom:2px">Вопросы: ${esc(r.questions)}</div>` : ""}
+        ${r.comment ? `<div style="font-size:12px;color:#333">${esc(r.comment)}</div>` : ""}
         <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:6px">
           ${pillsHtml}
         </div>
@@ -619,6 +626,8 @@ async function loadReviewsTab(companyId, companyName) {
     `)}
     <div id="review-form-wrap"></div>
     ${listHtml ? `<hr class="divider">${listHtml}` : ""}
+    <hr class="divider">
+    <div id="global-feed-wrap"></div>
   `;
 
   document.getElementById("btn-open-form")?.addEventListener("click", () => {
@@ -700,6 +709,164 @@ async function loadReviewsTab(companyId, companyName) {
     });
   }
 
+  loadGlobalFeed();
+}
+
+let _feedOffset = 0;
+let _feedLoading = false;
+
+async function loadGlobalFeed() {
+  const wrap = document.getElementById("global-feed-wrap");
+  if (!wrap) return;
+
+  const stats = await apiFetch("/reviews/stats");
+  const total = stats?.total || 0;
+
+  wrap.innerHTML = `
+    ${card("Все отзывы в DreamHole", `
+      ${row("Всего отзывов:", total)}
+      ${stats?.companies ? row("Компаний:", stats.companies) : ""}
+    `)}
+    <div id="feed-list" style="max-height:400px;overflow-y:auto;scroll-behavior:smooth"></div>
+    ${total > 0 ? `<div style="text-align:center;padding:6px">
+      <button id="btn-feed-more" style="padding:6px 16px;background:#111;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit">
+        Показать отзывы
+      </button>
+    </div>` : ""}
+  `;
+
+  _feedOffset = 0;
+
+  const btn = document.getElementById("btn-feed-more");
+  if (btn) {
+    btn.addEventListener("click", () => loadFeedPage());
+  }
+
+  const feedList = document.getElementById("feed-list");
+  if (feedList) {
+    feedList.addEventListener("scroll", () => {
+      if (_feedLoading) return;
+      if (feedList.scrollTop + feedList.clientHeight >= feedList.scrollHeight - 50) {
+        loadFeedPage();
+      }
+    });
+  }
+}
+
+async function loadFeedPage() {
+  if (_feedLoading) return;
+  _feedLoading = true;
+
+  const feedList = document.getElementById("feed-list");
+  const btn = document.getElementById("btn-feed-more");
+  if (!feedList) { _feedLoading = false; return; }
+
+  if (btn) { btn.textContent = "Загрузка..."; btn.disabled = true; }
+
+  const data = await apiFetch(`/reviews/feed?offset=${_feedOffset}&limit=20`);
+  const reviews = data?.reviews || [];
+
+  if (!reviews.length) {
+    if (btn) btn.style.display = "none";
+    if (_feedOffset === 0) feedList.innerHTML = note("Отзывов пока нет");
+    _feedLoading = false;
+    return;
+  }
+
+  const stored = await chrome.storage.local.get("voted_reviews");
+  const votes = stored.voted_reviews || {};
+
+  const html = reviews.map(r => {
+    const status = STATUS_LABELS[r.process_status] || esc(r.process_status);
+    const date = r.submitted_at
+      ? new Date(r.submitted_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })
+      : "";
+    const diff = r.difficulty ? `сложность ${r.difficulty}/5` : "";
+    const hr = r.hr_rating ? `HR ${r.hr_rating}/5` : "";
+    const meta = [esc(r.role_category), diff, hr].filter(Boolean).join(" · ");
+
+    const voted = votes[r.id];
+    const REACTIONS = [
+      { key: "like", emoji: "👍", count: r.likes || 0 },
+      { key: "dislike", emoji: "👎", count: r.dislikes || 0 },
+      { key: "fire", emoji: "🔥", count: r.fire || 0 },
+      { key: "poop", emoji: "💩", count: r.poop || 0 },
+      { key: "clown", emoji: "🤡", count: r.clown || 0 },
+    ];
+    const pillsHtml = REACTIONS.map(rx => {
+      const active = voted === rx.key;
+      return `<button class="btn-feed-vote" data-id="${r.id}" data-vote="${rx.key}"
+        style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:20px;
+               border:1px solid ${active ? "#555" : "#e0e0e0"};
+               background:${active ? "#f0f0f0" : "#fff"};
+               cursor:pointer;font-size:11px;font-family:inherit;line-height:1.3">
+        ${rx.emoji}<span class="fvote-${rx.key}-${r.id}">${rx.count}</span>
+      </button>`;
+    }).join("");
+
+    return `<div class="card" style="margin-bottom:4px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
+        <span style="font-size:12px;font-weight:600">${esc(r.company_name)}</span>
+        <span class="note">${date}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
+        <span class="note">${status}</span>
+      </div>
+      ${meta ? `<div class="note" style="margin-bottom:2px">${meta}</div>` : ""}
+      ${r.comment ? `<div style="font-size:12px;color:#333;margin-bottom:4px">${esc(r.comment)}</div>` : ""}
+      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+        ${pillsHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  feedList.insertAdjacentHTML("beforeend", html);
+  _feedOffset += reviews.length;
+
+  if (btn) {
+    if (reviews.length < 20) {
+      btn.style.display = "none";
+    } else {
+      btn.textContent = "Ещё отзывы";
+      btn.disabled = false;
+    }
+  }
+
+  // Vote handlers for feed
+  feedList.querySelectorAll(".btn-feed-vote:not([data-bound])").forEach(btn => {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const vote = btn.dataset.vote;
+      const stored2 = await chrome.storage.local.get("voted_reviews");
+      const v = stored2.voted_reviews || {};
+      if (v[id]) return;
+
+      const userHash = await getVoteHash(id);
+      const result = await apiFetch(`/reviews/${id}/vote/${vote}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_hash: userHash }),
+      });
+      if (!result || result.error) return;
+
+      v[id] = vote;
+      await chrome.storage.local.set({ voted_reviews: v });
+
+      const colMap = { like: "likes", dislike: "dislikes", fire: "fire", poop: "poop", clown: "clown" };
+      for (const [key, col] of Object.entries(colMap)) {
+        const el = feedList.querySelector(`.fvote-${key}-${id}`);
+        if (el && result[col] !== undefined) el.textContent = result[col];
+      }
+      feedList.querySelectorAll(`.btn-feed-vote[data-id="${id}"]`).forEach(b => {
+        const active = b.dataset.vote === vote;
+        b.style.border = `1px solid ${active ? "#555" : "#e0e0e0"}`;
+        b.style.background = active ? "#f0f0f0" : "#fff";
+      });
+    });
+  });
+
+  _feedLoading = false;
 }
 
 async function openReviewForm(companyId, companyName) {
@@ -707,7 +874,7 @@ async function openReviewForm(companyId, companyName) {
   if (!wrap) return;
 
   wrap.innerHTML = card("Ваш опыт", `
-    <div style="font-size:11px;color:#999;margin-bottom:10px">${companyName} · анонимно, без регистрации</div>
+    <div style="font-size:11px;color:#999;margin-bottom:10px">${esc(companyName)} · анонимно, без регистрации</div>
 
     <div class="form-section">
       <div class="form-label">Этапы которые были</div>

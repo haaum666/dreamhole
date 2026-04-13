@@ -1,4 +1,4 @@
-const API = "https://moiraidrone.fvds.ru/hh";
+const API = "https://api.dreamhole.ru/hh";
 
 
 // ── Utils ─────────────────────────────────────────────────────────────────────

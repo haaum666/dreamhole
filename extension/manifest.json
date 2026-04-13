@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "DreamHole",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Аналитика вакансий hh.ru: сколько висит, менялась ли зарплата, выше или ниже рынка, отзывы о найме.",
   "permissions": ["tabs", "storage"],
   "host_permissions": [
     "https://hh.ru/*",
     "https://*.hh.ru/*",
-    "https://moiraidrone.fvds.ru/*"
+    "https://api.dreamhole.ru/*"
   ],
   "action": {
     "default_title": "DreamHole",

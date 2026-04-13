@@ -3,9 +3,12 @@ FastAPI server — serves insights to the Chrome extension.
 """
 import logging
 import re
+import time
+from collections import defaultdict
 from datetime import datetime, timezone
 import aiohttp
-from fastapi import FastAPI, HTTPException, Query, Header
+from fastapi import FastAPI, HTTPException, Query, Header, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -33,6 +36,7 @@ from database import (
     delete_review,
     update_review,
     get_reviews_stats,
+    get_reviews_feed,
 )
 
 log = logging.getLogger(__name__)
@@ -41,9 +45,30 @@ app = FastAPI(title="HH Insights API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
+
+
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+RATE_LIMIT = 60
+RATE_WINDOW = 60
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    bucket = _rate_buckets[ip]
+    bucket[:] = [t for t in bucket if now - t < RATE_WINDOW]
+    if len(bucket) >= RATE_LIMIT:
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+    bucket.append(now)
+    if len(_rate_buckets) > 10000:
+        cutoff = now - RATE_WINDOW
+        for k in list(_rate_buckets):
+            if not _rate_buckets[k] or _rate_buckets[k][-1] < cutoff:
+                del _rate_buckets[k]
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -311,6 +336,10 @@ class ReviewIn(BaseModel):
 
 @app.post("/reviews")
 async def submit_review(body: ReviewIn):
+    if body.comment and len(body.comment) > 5000:
+        raise HTTPException(400, "Комментарий слишком длинный (макс. 5000 символов)")
+    if body.questions and len(body.questions) > 3000:
+        raise HTTPException(400, "Вопросы слишком длинные (макс. 3000 символов)")
     pool = await get_pool(DATABASE_URL)
     result = await insert_review(pool, body.dict())
     if "error" in result:
@@ -319,6 +348,19 @@ async def submit_review(body: ReviewIn):
         if result["error"] == "rate_limit":
             raise HTTPException(429, "Слишком много отзывов за сутки")
     return result
+
+
+@app.get("/reviews/stats")
+async def reviews_stats():
+    pool = await get_pool(DATABASE_URL)
+    return await get_reviews_stats(pool)
+
+
+@app.get("/reviews/feed")
+async def reviews_feed(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50)):
+    pool = await get_pool(DATABASE_URL)
+    reviews = await get_reviews_feed(pool, offset, limit)
+    return {"reviews": reviews, "offset": offset, "limit": limit}
 
 
 @app.get("/reviews/{company_id}")
@@ -361,14 +403,6 @@ async def vote_review_endpoint(review_id: int, vote: str, body: VoteIn):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-# ── Reviews stats ─────────────────────────────────────────────────────────────
-
-@app.get("/reviews/stats")
-async def reviews_stats():
-    pool = await get_pool(DATABASE_URL)
-    return await get_reviews_stats(pool)
 
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
